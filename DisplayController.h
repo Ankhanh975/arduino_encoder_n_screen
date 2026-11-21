@@ -199,6 +199,48 @@ private:
     display.print(text);
   }
 
+  uint8_t estimateBatteryPercentage(uint16_t cellVoltageHundredths) {
+    struct BatteryVoltagePoint {
+      uint16_t voltageHundredths;
+      uint8_t percentage;
+    };
+
+    static const BatteryVoltagePoint curve[] = {
+      {300, 0}, {330, 5}, {350, 10}, {360, 15}, {370, 20},
+      {375, 25}, {380, 30}, {385, 40}, {390, 50}, {395, 60},
+      {400, 70}, {405, 80}, {410, 90}, {415, 95}, {420, 100}
+    };
+    const uint8_t pointCount =
+      sizeof(curve) / sizeof(curve[0]);
+
+    if (cellVoltageHundredths <= curve[0].voltageHundredths) {
+      return 0;
+    }
+
+    for (uint8_t i = 1; i < pointCount; ++i) {
+      if (cellVoltageHundredths <= curve[i].voltageHundredths) {
+        const uint16_t voltageRange =
+          curve[i].voltageHundredths -
+          curve[i - 1].voltageHundredths;
+        const uint16_t voltageAboveLowerPoint =
+          cellVoltageHundredths -
+          curve[i - 1].voltageHundredths;
+        const uint8_t percentageRange =
+          curve[i].percentage - curve[i - 1].percentage;
+        return static_cast<uint8_t>(
+          curve[i - 1].percentage +
+          (
+            static_cast<uint32_t>(voltageAboveLowerPoint) *
+              percentageRange +
+            voltageRange / 2
+          ) / voltageRange
+        );
+      }
+    }
+
+    return 100;
+  }
+
   void drawFrame() {
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
@@ -206,6 +248,7 @@ private:
     char temperature[6];
     char current[5];
     char voltage[8];
+    char battery[5];
     char rpm[11];
     char throttle[6];
 
@@ -220,6 +263,9 @@ private:
             VOLTAGE_CALIBRATION_PACK_HUNDREDTHS +
           calibrationDenominator / 2
         ) / calibrationDenominator;
+      const uint8_t batteryPercentage = estimateBatteryPercentage(
+        static_cast<uint16_t>(cellVoltageHundredths)
+      );
       snprintf(
         temperature,
         sizeof(temperature),
@@ -240,6 +286,12 @@ private:
         static_cast<unsigned long>(cellVoltageHundredths % 100)
       );
       snprintf(
+        battery,
+        sizeof(battery),
+        "%u%%",
+        static_cast<unsigned int>(batteryPercentage)
+      );
+      snprintf(
         rpm,
         sizeof(rpm),
         "%lu",
@@ -251,6 +303,7 @@ private:
       snprintf(temperature, sizeof(temperature), "--");
       snprintf(current, sizeof(current), "--A");
       snprintf(voltage, sizeof(voltage), "--V");
+      snprintf(battery, sizeof(battery), "--%%");
       snprintf(rpm, sizeof(rpm), "--");
     }
 
@@ -260,18 +313,28 @@ private:
       snprintf(throttle, sizeof(throttle), "OFF");
     }
 
-    drawCenteredText("THR", 1, 0);
-    drawCenteredText(throttle, 1, 8);
-    drawCenteredText("V/A", 1, 24);
-    drawCenteredText(voltage, 1, 32);
-    drawCenteredText(current, 1, 40);
-    drawCenteredText("RPM", 1, 56);
-    int16_t y = 64;
+    int16_t y = 0;
+    drawCenteredText("THR", 1, y);
+    y += 8;
+    drawCenteredText(throttle, 1, y);
+    y += 16;
+    drawCenteredText("RPM", 1, y);
+    y += 8;
     drawWrappedCenteredText(rpm, y);
     y += 8;
+    drawCenteredText("V/A", 1, y);
+    y += 8;
+    drawCenteredText(voltage, 1, y);
+    y += 8;
+    drawCenteredText(current, 1, y);
+    y += 16;
     drawCenteredText("TEMP", 1, y);
     y += 8;
     drawCenteredText(temperature, 1, y);
+    y += 16;
+    drawCenteredText("BAT", 1, y);
+    y += 8;
+    drawCenteredText(battery, 1, y);
     display.display();
   }
 

@@ -12,7 +12,7 @@ This project is a small Arduino sketch for controlling an electronic speed contr
 - OLED dashboard in the existing portrait orientation, showing throttle, ESC temperature, current, voltage, and electrical RPM; long values wrap to a second line
 - Auto-display sleep after inactivity
 - DShot startup sequence for safe arming and extended telemetry enablement
-- ESC telemetry is read continuously and the OLED dashboard refreshes every 250 ms
+- ESC telemetry is read continuously and the OLED dashboard refreshes every 50 ms (up to 20 times per second)
 - OLED I²C recovery: bounded bus timeouts and OLED address checks trigger bus/display reinitialization and periodic retries without stopping the ESC control loop
 
 ## Hardware

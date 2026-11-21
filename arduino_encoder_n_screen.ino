@@ -173,7 +173,7 @@ ISR(PCINT2_vect) {
 #endif
 
 const unsigned long DISPLAY_SLEEP_TIMEOUT = 45000;
-const unsigned long TELEMETRY_DISPLAY_INTERVAL = 250;
+const unsigned long TELEMETRY_DISPLAY_INTERVAL = 50;
 
 int value = 14;
 bool enabled = false;
