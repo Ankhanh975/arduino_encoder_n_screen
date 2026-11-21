@@ -250,6 +250,7 @@ BiDirectionalDShot::BiDirectionalDShot(
     _temperatureCelsius(0),
     _voltageQuarterVolts(0),
     _currentAmps(0),
+    _currentAvailable(false),
     _debug1(0),
     _debug2(0),
     _debug3(0),
@@ -274,13 +275,15 @@ bool BiDirectionalDShot::begin() {
   return true;
 }
 
-bool BiDirectionalDShot::setThrottle(uint16_t value) {
+bool BiDirectionalDShot::setThrottle(
+    uint16_t value,
+    bool telemetryRequest) {
   if(!_begun || value > 2047) {
     return false;
   }
 
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    frame = buildFrame(value, false, invertedSignal);
+    frame = buildFrame(value, telemetryRequest, invertedSignal);
   }
   return true;
 }
@@ -344,7 +347,10 @@ bool BiDirectionalDShot::readTelemetry(Telemetry& telemetry) {
       switch(packageType) {
         case 0x02: _temperatureCelsius = periodBase; break;
         case 0x04: _voltageQuarterVolts = periodBase; break;
-        case 0x06: _currentAmps = periodBase; break;
+        case 0x06:
+          _currentAmps = static_cast<uint16_t>(periodBase);
+          _currentAvailable = true;
+          break;
         case 0x08: _debug1 = periodBase; break;
         case 0x0A: _debug2 = periodBase; break;
         case 0x0C: _debug3 = periodBase; break;
@@ -368,6 +374,7 @@ bool BiDirectionalDShot::readTelemetry(Telemetry& telemetry) {
   telemetry.temperatureCelsius = _temperatureCelsius;
   telemetry.voltageQuarterVolts = _voltageQuarterVolts;
   telemetry.currentAmps = _currentAmps;
+  telemetry.currentAvailable = _currentAvailable;
   telemetry.debug1 = _debug1;
   telemetry.debug2 = _debug2;
   telemetry.debug3 = _debug3;

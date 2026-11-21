@@ -34,14 +34,16 @@ public:
     int value,
     bool enabled,
     bool telemetryAvailable,
+    bool currentTelemetryAvailable,
     uint8_t temperatureCelsius,
-    uint8_t currentAmps,
+    uint16_t currentAmps,
     uint8_t voltageQuarterVolts,
     uint32_t electricalRpm
   ) {
     this->value = value;
     this->enabled = enabled;
     this->telemetryAvailable = telemetryAvailable;
+    this->currentTelemetryAvailable = currentTelemetryAvailable;
     this->temperatureCelsius = temperatureCelsius;
     this->currentAmps = currentAmps;
     this->voltageQuarterVolts = voltageQuarterVolts;
@@ -104,8 +106,9 @@ private:
   int value = 14;
   bool enabled = false;
   bool telemetryAvailable = false;
+  bool currentTelemetryAvailable = false;
   uint8_t temperatureCelsius = 0;
-  uint8_t currentAmps = 0;
+  uint16_t currentAmps = 0;
   uint8_t voltageQuarterVolts = 0;
   uint32_t electricalRpm = 0;
   bool initialized = false;
@@ -272,12 +275,16 @@ private:
         "%uC",
         static_cast<unsigned int>(temperatureCelsius)
       );
-      snprintf(
-        current,
-        sizeof(current),
-        "%uA",
-        static_cast<unsigned int>(currentAmps)
-      );
+      if (currentTelemetryAvailable) {
+        snprintf(
+          current,
+          sizeof(current),
+          "%uA",
+          static_cast<unsigned int>(currentAmps)
+        );
+      } else {
+        snprintf(current, sizeof(current), "--A");
+      }
       snprintf(
         voltage,
         sizeof(voltage),

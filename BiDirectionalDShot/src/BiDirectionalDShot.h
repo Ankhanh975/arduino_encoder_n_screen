@@ -25,7 +25,8 @@ public:
     uint8_t expectedCrc;
     uint8_t temperatureCelsius;
     uint8_t voltageQuarterVolts;
-    uint8_t currentAmps;
+    uint16_t currentAmps;
+    bool currentAvailable;
     uint8_t debug1;
     uint8_t debug2;
     uint8_t debug3;
@@ -44,7 +45,7 @@ public:
       bool extendedTelemetry = false);
 
   bool begin();
-  bool setThrottle(uint16_t value);
+  bool setThrottle(uint16_t value, bool telemetryRequest = false);
   bool sendCommand(uint8_t command, bool telemetryRequest = false);
   bool readTelemetry(Telemetry& telemetry);
 
@@ -59,7 +60,8 @@ private:
   uint32_t _successfulPackets;
   uint8_t _temperatureCelsius;
   uint8_t _voltageQuarterVolts;
-  uint8_t _currentAmps;
+  uint16_t _currentAmps;
+  bool _currentAvailable;
   uint8_t _debug1;
   uint8_t _debug2;
   uint8_t _debug3;

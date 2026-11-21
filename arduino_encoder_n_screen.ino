@@ -19,7 +19,7 @@ const int CLK_PIN = 2;
 const int DT_PIN  = 4;
 const int SW_PIN  = 5;
 const int ESC_PIN = 8;
-const uint16_t MIN_DSHOT_THROTTLE = 48;
+const uint16_t MIN_DSHOT_THROTTLE = 198;
 const uint16_t MAX_DSHOT_THROTTLE = 2047;
 
 Adafruit_SSD1306 display(
@@ -54,12 +54,12 @@ public:
       return false;
     }
 
-    delay(2000);
+    delay(1500);
     if (!esc.sendCommand(13, true)) {
       return false;
     }
     delay(24);
-    if (!esc.setThrottle(0)) {
+    if (!esc.setThrottle(0, true)) {
       return false;
     }
 
@@ -93,6 +93,17 @@ public:
     const uint32_t elapsedSteps = elapsed / RAMP_UPDATE_INTERVAL_US;
     lastRampUpdateMicros += elapsedSteps * RAMP_UPDATE_INTERVAL_US;
 
+    if (enabled &&
+        currentThrottleQ16 < DSHOT_MIN_VALID_THROTTLE_Q16) {
+      currentThrottleQ16 = DSHOT_MIN_VALID_THROTTLE_Q16;
+      if (!esc.setThrottle(MIN_DSHOT_THROTTLE, true)) {
+        return false;
+      }
+
+      currentThrottleCommand = MIN_DSHOT_THROTTLE;
+      return true;
+    }
+
     const uint32_t remaining = currentThrottleQ16 > targetThrottleQ16
       ? currentThrottleQ16 - targetThrottleQ16
       : targetThrottleQ16 - currentThrottleQ16;
@@ -121,7 +132,7 @@ public:
       return true;
     }
 
-    if (!esc.setThrottle(nextThrottleCommand)) {
+    if (!esc.setThrottle(nextThrottleCommand, true)) {
       return false;
     }
 
@@ -137,7 +148,7 @@ private:
   BiDirectionalDShot esc;
   uint16_t minThrottle;
   uint16_t maxThrottle;
-  int value = 14;
+  int value = 22;
   uint32_t currentThrottleQ16 = 0;
   uint16_t currentThrottleCommand = 0;
   uint32_t lastRampUpdateMicros = 0;
@@ -145,7 +156,7 @@ private:
 
   static const uint32_t Q16_ONE = 65536UL;
   static const uint32_t RAMP_UPDATE_INTERVAL_US = 16667UL;
-  static const uint32_t RAMP_STEPS_FULL_SCALE = 7UL * 60UL;
+  static const uint32_t RAMP_STEPS_FULL_SCALE = 7UL * 60UL / 3UL;
   static const uint32_t RAMP_STEP_Q16 =
     (static_cast<uint32_t>(MAX_DSHOT_THROTTLE) * Q16_ONE +
      RAMP_STEPS_FULL_SCALE / 2) /
@@ -172,14 +183,15 @@ ISR(PCINT2_vect) {
 }
 #endif
 
-const unsigned long DISPLAY_SLEEP_TIMEOUT = 45000;
+const unsigned long DISPLAY_SLEEP_TIMEOUT = 60000;
 const unsigned long TELEMETRY_DISPLAY_INTERVAL = 50;
 
-int value = 14;
+int value = 22;
 bool enabled = false;
 bool telemetryAvailable = false;
 uint8_t temperatureCelsius = 0;
-uint8_t currentAmps = 0;
+uint16_t currentAmps = 0;
+bool currentTelemetryAvailable = false;
 uint8_t voltageQuarterVolts = 0;
 uint32_t electricalRpm = 0;
 unsigned long lastInputTime = 0;
@@ -200,6 +212,7 @@ void refreshDisplay() {
     value,
     enabled,
     telemetryAvailable,
+    currentTelemetryAvailable,
     temperatureCelsius,
     currentAmps,
     voltageQuarterVolts,
@@ -220,7 +233,7 @@ void wakeDisplay() {
 }
 
 void setup() {
-  value = 14;
+  value = 22;
   enabled = false;
 
   Wire.begin();
@@ -246,6 +259,7 @@ void loop() {
     telemetryAvailable = true;
     temperatureCelsius = telemetry.temperatureCelsius;
     currentAmps = telemetry.currentAmps;
+    currentTelemetryAvailable = telemetry.currentAvailable;
     voltageQuarterVolts = telemetry.voltageQuarterVolts;
     electricalRpm = telemetry.periodMicroseconds > 0
       ? 60000000UL / telemetry.periodMicroseconds
@@ -277,7 +291,7 @@ void loop() {
     } else {
       enabled = !enabled;
       if (!enabled) {
-        value = 14;
+        value = 22;
         escController.setValue(value);
       }
       escController.setEnabled(enabled);

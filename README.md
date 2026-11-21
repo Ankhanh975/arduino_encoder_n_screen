@@ -8,11 +8,12 @@ This project is a small Arduino sketch for controlling an electronic speed contr
 - Encoder rotation decoded with pin-change interrupts on Nano pins 2 and 4; skipped intermediate states are inferred from rotation direction, and queued detents are applied before one display refresh
 - Button press toggles the ESC on/off
 - Bidirectional DShot 300 ESC control using the tested ATmega328P driver on pin D8
-- DShot throttle uses a linear ramp in both directions, taking about 7 seconds from full stop to full throttle and updating at 60 Hz
+- DShot throttle starts at 198 when enabled, then ramps linearly in both directions at 60 Hz; reaching full throttle takes about 2.1 seconds from the starting command
 - OLED dashboard in the existing portrait orientation, showing throttle, ESC temperature, current, voltage, and electrical RPM; long values wrap to a second line
-- Auto-display sleep after inactivity
+- Auto-display sleep after 60 seconds of inactivity
 - DShot startup sequence for safe arming and extended telemetry enablement
-- ESC telemetry is read continuously and the OLED dashboard refreshes every 50 ms (up to 20 times per second)
+- ESC telemetry is requested on runtime DShot frames at 500 Hz and read continuously; the OLED dashboard refreshes every 50 ms (up to 20 times per second)
+- The current field keeps the decoded telemetry value in 16-bit storage and displays `--A` until the ESC reports a current packet
 - OLED I²C recovery: bounded bus timeouts and OLED address checks trigger bus/display reinitialization and periodic retries without stopping the ESC control loop
 
 ## Hardware
@@ -59,11 +60,11 @@ Install these libraries in the Arduino IDE or PlatformIO environment:
 
 ## Notes
 
-- The ESC startup routine sends DShot stop, then requests extended telemetry before normal operation. eRPM is calculated from the reported electrical period.
+- The ESC startup routine sends DShot stop, then requests extended telemetry before normal operation. Runtime throttle and stop frames continue requesting telemetry; eRPM is calculated from the reported electrical period. `TELEMETRY_DISPLAY_INTERVAL` only sets the OLED refresh interval, not the DShot telemetry request rate.
 - Fatal ESC startup or throttle-update errors are shown on the OLED; the sketch does not log to Serial.
 - The throttle is constrained to a range of 0 to 100 and is only sent to the ESC when enabled.
 - Display sleep is enabled after a timeout to reduce burn-in and save power.
-- Enabled throttle maps 0–100% directly to the standard DShot throttle range of 48–2047; disabled output is DShot stop (0).
+- Enabled throttle maps 0–100% to the DShot throttle range of 198–2047, skipping lower values that stall the motor; the first command is 198 and disabled output is DShot stop (0). Actual motor spin-up time depends on the ESC and motor.
 
 ## File structure
 
