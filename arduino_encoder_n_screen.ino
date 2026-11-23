@@ -11,10 +11,6 @@
 // Hardware configuration
 // =========================
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32
-#define OLED_RESET -1
-
 const int CLK_PIN = 2;
 const int DT_PIN  = 4;
 const int SW_PIN  = 5;
@@ -22,12 +18,7 @@ const int ESC_PIN = 8;
 const uint16_t MIN_DSHOT_THROTTLE = 198;
 const uint16_t MAX_DSHOT_THROTTLE = 2047;
 
-Adafruit_SSD1306 display(
-  SCREEN_WIDTH,
-  SCREEN_HEIGHT,
-  &Wire,
-  OLED_RESET
-);
+SSD1306Display display(Wire);
 
 // =========================
 // ESC controller
@@ -54,18 +45,8 @@ public:
       return false;
     }
 
-    delay(1500);
-    if (!esc.sendCommand(13, true)) {
-      return false;
-    }
-    delay(24);
-    if (!esc.setThrottle(0, true)) {
-      return false;
-    }
-
-    currentThrottleQ16 = 0;
-    currentThrottleCommand = 0;
-    lastRampUpdateMicros = micros();
+    startupState = StartupState::WaitingToEnableTelemetry;
+    startupStateStartedAt = millis();
     return true;
   }
 
@@ -78,6 +59,40 @@ public:
   }
 
   bool update() {
+    const unsigned long armingNow = millis();
+    if (startupState == StartupState::WaitingToEnableTelemetry) {
+      if (armingNow - startupStateStartedAt < ARMING_DELAY_MS) {
+        return true;
+      }
+
+      if (!esc.sendCommand(13, true)) {
+        return false;
+      }
+      startupState = StartupState::WaitingForTelemetryCommand;
+      startupStateStartedAt = armingNow;
+      return true;
+    }
+
+    if (startupState == StartupState::WaitingForTelemetryCommand) {
+      if (armingNow - startupStateStartedAt < TELEMETRY_COMMAND_DURATION_MS) {
+        return true;
+      }
+
+      if (!esc.setThrottle(0, true)) {
+        return false;
+      }
+
+      currentThrottleQ16 = 0;
+      currentThrottleCommand = 0;
+      lastRampUpdateMicros = micros();
+      startupState = StartupState::Ready;
+      return true;
+    }
+
+    if (startupState != StartupState::Ready) {
+      return false;
+    }
+
     const uint16_t targetThrottle = enabled
       ? map(value, 0, 100, minThrottle, maxThrottle)
       : 0;
@@ -141,13 +156,25 @@ public:
   }
 
   bool readTelemetry(BiDirectionalDShot::Telemetry &telemetry) {
+    if (startupState != StartupState::Ready) {
+      return false;
+    }
     return esc.readTelemetry(telemetry);
   }
 
 private:
+  enum class StartupState : uint8_t {
+    Idle,
+    WaitingToEnableTelemetry,
+    WaitingForTelemetryCommand,
+    Ready
+  };
+
   BiDirectionalDShot esc;
   uint16_t minThrottle;
   uint16_t maxThrottle;
+  StartupState startupState = StartupState::Idle;
+  unsigned long startupStateStartedAt = 0;
   int value = 22;
   uint32_t currentThrottleQ16 = 0;
   uint16_t currentThrottleCommand = 0;
@@ -155,6 +182,8 @@ private:
   bool enabled = false;
 
   static const uint32_t Q16_ONE = 65536UL;
+  static const unsigned long ARMING_DELAY_MS = 1500;
+  static const unsigned long TELEMETRY_COMMAND_DURATION_MS = 24;
   static const uint32_t RAMP_UPDATE_INTERVAL_US = 16667UL;
   static const uint32_t RAMP_STEPS_FULL_SCALE = 7UL * 60UL / 3UL;
   static const uint32_t RAMP_STEP_Q16 =
@@ -184,7 +213,7 @@ ISR(PCINT2_vect) {
 #endif
 
 const unsigned long DISPLAY_SLEEP_TIMEOUT = 60000;
-const unsigned long TELEMETRY_DISPLAY_INTERVAL = 50;
+const uint32_t DISPLAY_REFRESH_INTERVAL_US = 16667UL;
 
 int value = 22;
 bool enabled = false;
@@ -195,7 +224,7 @@ bool currentTelemetryAvailable = false;
 uint8_t voltageQuarterVolts = 0;
 uint32_t electricalRpm = 0;
 unsigned long lastInputTime = 0;
-unsigned long lastTelemetryDisplayTime = 0;
+uint32_t lastDisplayRefreshMicros = 0;
 bool displayAsleep = false;
 
 void stopWithError(const __FlashStringHelper *message) {
@@ -248,7 +277,7 @@ void setup() {
   }
 
   refreshDisplay();
-  lastTelemetryDisplayTime = millis();
+  lastDisplayRefreshMicros = micros();
   pinMode(1, INPUT);
   lastInputTime = millis();
 }
@@ -305,9 +334,10 @@ void loop() {
     stopWithError(F("Failed to update DShot throttle."));
   }
 
-  const unsigned long now = millis();
-  if (now - lastTelemetryDisplayTime >= TELEMETRY_DISPLAY_INTERVAL) {
-    lastTelemetryDisplayTime = now;
+  const uint32_t nowMicros = micros();
+  if (nowMicros - lastDisplayRefreshMicros >=
+      DISPLAY_REFRESH_INTERVAL_US) {
+    lastDisplayRefreshMicros = nowMicros;
     if (!displayAsleep) {
       refreshNeeded = true;
     }

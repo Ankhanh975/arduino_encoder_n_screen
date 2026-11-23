@@ -12,7 +12,9 @@ This project is a small Arduino sketch for controlling an electronic speed contr
 - OLED dashboard in the existing portrait orientation, showing throttle, ESC temperature, current, voltage, and electrical RPM; long values wrap to a second line
 - Auto-display sleep after 60 seconds of inactivity
 - DShot startup sequence for safe arming and extended telemetry enablement
-- ESC telemetry is requested on runtime DShot frames at 500 Hz and read continuously; the OLED dashboard refreshes every 50 ms (up to 20 times per second)
+- ESC arming runs without blocking encoder/button input; throttle requests are applied after arming completes
+- ESC telemetry is requested on runtime DShot frames at 500 Hz and read continuously; the OLED dashboard refreshes at up to 60 fps
+- OLED text is rendered with Adafruit GFX and a small SSD1306 I2C driver; only changed page/column regions are sent to the display
 - The current field keeps the decoded telemetry value in 16-bit storage and displays `--A` until the ESC reports a current packet
 - OLED I²C recovery: bounded bus timeouts and OLED address checks trigger bus/display reinitialization and periodic retries without stopping the ESC control loop
 
@@ -47,7 +49,6 @@ Install these libraries in the Arduino IDE or PlatformIO environment:
 
 - `Wire`
 - `Adafruit_GFX`
-- `Adafruit_SSD1306`
 - Bundled `BiDirectionalDShot` driver (GPL-3.0-only; see its `LICENSE` file)
 
 ## Operation
@@ -60,7 +61,7 @@ Install these libraries in the Arduino IDE or PlatformIO environment:
 
 ## Notes
 
-- The ESC startup routine sends DShot stop, then requests extended telemetry before normal operation. Runtime throttle and stop frames continue requesting telemetry; eRPM is calculated from the reported electrical period. `TELEMETRY_DISPLAY_INTERVAL` only sets the OLED refresh interval, not the DShot telemetry request rate.
+- The ESC startup routine sends DShot stop, then requests extended telemetry before normal operation. Runtime throttle and stop frames continue requesting telemetry; eRPM is calculated from the reported electrical period. `DISPLAY_REFRESH_INTERVAL_US` only sets the OLED refresh interval, not the DShot telemetry request rate.
 - Fatal ESC startup or throttle-update errors are shown on the OLED; the sketch does not log to Serial.
 - The throttle is constrained to a range of 0 to 100 and is only sent to the ESC when enabled.
 - Display sleep is enabled after a timeout to reduce burn-in and save power.

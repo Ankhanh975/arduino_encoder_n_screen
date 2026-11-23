@@ -3,11 +3,210 @@
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_GFX.h>
+#include <string.h>
+
+class SSD1306Display : public Adafruit_GFX {
+public:
+  enum {
+    WHITE = 1,
+    BLACK = 0,
+    DISPLAY_OFF = 0xAE,
+    DISPLAY_ON = 0xAF
+  };
+
+  explicit SSD1306Display(TwoWire &wire)
+    : Adafruit_GFX(DISPLAY_WIDTH, DISPLAY_HEIGHT),
+      wire(wire) {}
+
+  bool begin(uint8_t address) {
+    this->address = address;
+    memset(buffer, 0, sizeof(buffer));
+
+    static const uint8_t initializationCommands[] = {
+      0xAE,       // Display off
+      0xD5, 0x80, // Clock divide ratio
+      0xA8, 0x1F, // Multiplex ratio for 128x32
+      0xD3, 0x00, // Display offset
+      0x40,       // Start line
+      0x8D, 0x14, // Charge pump
+      0x20, 0x00, // Horizontal addressing mode
+      0xA1,       // Segment remap
+      0xC8,       // COM scan direction
+      0xDA, 0x02, // COM pins for 128x32
+      0x81, 0x8F, // Contrast
+      0xD9, 0xF1, // Pre-charge period
+      0xDB, 0x40, // VCOMH deselect level
+      0xA4,       // Resume display from RAM
+      0xA6,       // Normal display
+      DISPLAY_ON
+    };
+
+    if (!sendPacket(0x00, initializationCommands,
+                    sizeof(initializationCommands))) {
+      return false;
+    }
+
+    markAllDirty();
+    return true;
+  }
+
+  bool command(uint8_t command) {
+    return sendPacket(0x00, &command, 1);
+  }
+
+  void clearDisplay() {
+    for (uint8_t page = 0; page < DISPLAY_PAGES; ++page) {
+      for (uint8_t column = 0; column < DISPLAY_WIDTH; ++column) {
+        const uint16_t index =
+          static_cast<uint16_t>(page) * DISPLAY_WIDTH + column;
+        if (buffer[index] != 0) {
+          buffer[index] = 0;
+          markDirty(column, page);
+        }
+      }
+    }
+  }
+
+  bool display() {
+    if (!dirty) {
+      return true;
+    }
+
+    const uint8_t window[] = {
+      0x21,
+      dirtyColumnMin,
+      dirtyColumnMax,
+      0x22,
+      dirtyPageMin,
+      dirtyPageMax
+    };
+    if (!sendPacket(0x00, window, sizeof(window))) {
+      return false;
+    }
+
+    uint8_t chunk[31];
+    uint8_t chunkLength = 0;
+    uint8_t page = dirtyPageMin;
+    uint8_t column = dirtyColumnMin;
+    while (page <= dirtyPageMax) {
+      chunk[chunkLength++] =
+        buffer[static_cast<uint16_t>(page) * DISPLAY_WIDTH + column];
+
+      if (column == dirtyColumnMax) {
+        column = dirtyColumnMin;
+        ++page;
+      } else {
+        ++column;
+      }
+
+      if (chunkLength == sizeof(chunk) || page > dirtyPageMax) {
+        if (!sendPacket(0x40, chunk, chunkLength)) {
+          return false;
+        }
+        chunkLength = 0;
+      }
+    }
+
+    dirty = false;
+    return true;
+  }
+
+  void drawPixel(int16_t x, int16_t y, uint16_t color) {
+    if (x < 0 || x >= width() || y < 0 || y >= height()) {
+      return;
+    }
+
+    switch (getRotation()) {
+      case 1: {
+        const int16_t oldX = x;
+        x = DISPLAY_WIDTH - 1 - y;
+        y = oldX;
+        break;
+      }
+      case 2:
+        x = DISPLAY_WIDTH - 1 - x;
+        y = DISPLAY_HEIGHT - 1 - y;
+        break;
+      case 3: {
+        const int16_t oldX = x;
+        x = y;
+        y = DISPLAY_HEIGHT - 1 - oldX;
+        break;
+      }
+    }
+
+    const uint8_t page = static_cast<uint8_t>(y / 8);
+    const uint16_t index =
+      static_cast<uint16_t>(page) * DISPLAY_WIDTH + x;
+    const uint8_t bit = static_cast<uint8_t>(1U << (y & 7));
+    const uint8_t updated = color == WHITE
+      ? buffer[index] | bit
+      : buffer[index] & static_cast<uint8_t>(~bit);
+
+    if (updated != buffer[index]) {
+      buffer[index] = updated;
+      markDirty(static_cast<uint8_t>(x), page);
+    }
+  }
+
+private:
+  static const uint8_t DISPLAY_WIDTH = 128;
+  static const uint8_t DISPLAY_HEIGHT = 32;
+  static const uint8_t DISPLAY_PAGES = DISPLAY_HEIGHT / 8;
+
+  TwoWire &wire;
+  uint8_t address = 0;
+  uint8_t buffer[DISPLAY_WIDTH * DISPLAY_PAGES] = {};
+  bool dirty = false;
+  uint8_t dirtyColumnMin = DISPLAY_WIDTH - 1;
+  uint8_t dirtyColumnMax = 0;
+  uint8_t dirtyPageMin = DISPLAY_PAGES - 1;
+  uint8_t dirtyPageMax = 0;
+
+  bool sendPacket(
+    uint8_t control,
+    const uint8_t *bytes,
+    uint8_t length
+  ) {
+    wire.beginTransmission(address);
+    const bool complete =
+      wire.write(control) == 1 &&
+      wire.write(bytes, length) == length;
+    const uint8_t status = wire.endTransmission();
+    const bool timedOut = wire.getWireTimeoutFlag();
+    wire.clearWireTimeoutFlag();
+    return complete && status == 0 && !timedOut;
+  }
+
+  void markAllDirty() {
+    dirty = true;
+    dirtyColumnMin = 0;
+    dirtyColumnMax = DISPLAY_WIDTH - 1;
+    dirtyPageMin = 0;
+    dirtyPageMax = DISPLAY_PAGES - 1;
+  }
+
+  void markDirty(uint8_t column, uint8_t page) {
+    if (!dirty) {
+      dirty = true;
+      dirtyColumnMin = column;
+      dirtyColumnMax = column;
+      dirtyPageMin = page;
+      dirtyPageMax = page;
+      return;
+    }
+
+    if (column < dirtyColumnMin) dirtyColumnMin = column;
+    if (column > dirtyColumnMax) dirtyColumnMax = column;
+    if (page < dirtyPageMin) dirtyPageMin = page;
+    if (page > dirtyPageMax) dirtyPageMax = page;
+  }
+};
 
 class DisplayController {
 public:
-  DisplayController(Adafruit_SSD1306 &display, TwoWire &wire)
+  DisplayController(SSD1306Display &display, TwoWire &wire)
     : display(display),
       wire(wire) {}
 
@@ -57,7 +256,7 @@ public:
       return;
     }
 
-    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    display.command(SSD1306Display::DISPLAY_OFF);
     recoverIfNeeded();
   }
 
@@ -67,7 +266,7 @@ public:
       return;
     }
 
-    display.ssd1306_command(SSD1306_DISPLAYON);
+    display.command(SSD1306Display::DISPLAY_ON);
     if (recoverIfNeeded()) {
       drawIfReady();
     }
@@ -79,9 +278,10 @@ public:
       return false;
     }
 
-    display.ssd1306_command(SSD1306_DISPLAYON);
+    hasRenderedFrame = false;
+    display.command(SSD1306Display::DISPLAY_ON);
     display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
+    display.setTextColor(SSD1306Display::WHITE, SSD1306Display::BLACK);
     display.setTextSize(1);
     display.setCursor(0, 0);
     display.println(F("ESC ERROR"));
@@ -101,7 +301,7 @@ private:
   static const uint32_t I2C_TIMEOUT_US = 25000;
   static const unsigned long RECOVERY_INTERVAL = 1000;
 
-  Adafruit_SSD1306 &display;
+  SSD1306Display &display;
   TwoWire &wire;
   int value = 14;
   bool enabled = false;
@@ -113,15 +313,24 @@ private:
   uint32_t electricalRpm = 0;
   bool initialized = false;
   bool sleeping = false;
+  bool hasRenderedFrame = false;
+  uint8_t lastRpmRows = 0;
+  char lastTemperature[6] = {};
+  char lastCurrent[7] = {};
+  char lastVoltage[8] = {};
+  char lastBattery[5] = {};
+  char lastRpm[11] = {};
+  char lastThrottle[6] = {};
   unsigned long lastRecoveryAttempt = 0;
 
   bool initializeDisplay() {
-    if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    if (!display.begin(OLED_ADDRESS)) {
       return false;
     }
 
+    hasRenderedFrame = false;
     display.setRotation(1);
-    display.setTextColor(SSD1306_WHITE);
+    display.setTextColor(SSD1306Display::WHITE, SSD1306Display::BLACK);
     return checkConnection();
   }
 
@@ -154,7 +363,7 @@ private:
     }
 
     if (sleeping) {
-      display.ssd1306_command(SSD1306_DISPLAYOFF);
+      display.command(SSD1306Display::DISPLAY_OFF);
     } else {
       drawFrame();
     }
@@ -209,10 +418,25 @@ private:
     };
 
     static const BatteryVoltagePoint curve[] = {
-      {300, 0}, {330, 5}, {350, 10}, {360, 15}, {370, 20},
-      {375, 25}, {380, 30}, {385, 40}, {390, 50}, {395, 60},
-      {400, 70}, {405, 80}, {410, 90}, {415, 95}, {420, 100}
+      {300,  0},
+      {330,  3},
+      {340,  5},
+      {350, 10},
+      {360, 20},
+      {365, 30},
+      {370, 50},
+      {375, 60},
+      {380, 70},
+      {385, 80},
+      {390, 90},
+      {395, 95},
+      {400, 97},
+      {405, 98},
+      {410, 99},
+      {415, 99},
+      {420, 100}
     };
+
     const uint8_t pointCount =
       sizeof(curve) / sizeof(curve[0]);
 
@@ -225,11 +449,15 @@ private:
         const uint16_t voltageRange =
           curve[i].voltageHundredths -
           curve[i - 1].voltageHundredths;
+
         const uint16_t voltageAboveLowerPoint =
           cellVoltageHundredths -
           curve[i - 1].voltageHundredths;
+
         const uint8_t percentageRange =
-          curve[i].percentage - curve[i - 1].percentage;
+          curve[i].percentage -
+          curve[i - 1].percentage;
+
         return static_cast<uint8_t>(
           curve[i - 1].percentage +
           (
@@ -245,11 +473,10 @@ private:
   }
 
   void drawFrame() {
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
+    display.setTextColor(SSD1306Display::WHITE, SSD1306Display::BLACK);
 
     char temperature[6];
-    char current[5];
+    char current[7];
     char voltage[8];
     char battery[5];
     char rpm[11];
@@ -320,29 +547,140 @@ private:
       snprintf(throttle, sizeof(throttle), "OFF");
     }
 
-    int16_t y = 0;
-    drawCenteredText("THR", 1, y);
-    y += 8;
-    drawCenteredText(throttle, 1, y);
-    y += 16;
-    drawCenteredText("RPM", 1, y);
-    y += 8;
-    drawWrappedCenteredText(rpm, y);
-    y += 8;
+    const uint8_t rpmRows = wrappedLineCount(rpm);
+    const int16_t lowerPanelY = 40 + rpmRows * 8;
+
+    if (hasRenderedFrame &&
+        strcmp(temperature, lastTemperature) == 0 &&
+        strcmp(current, lastCurrent) == 0 &&
+        strcmp(voltage, lastVoltage) == 0 &&
+        strcmp(battery, lastBattery) == 0 &&
+        strcmp(rpm, lastRpm) == 0 &&
+        strcmp(throttle, lastThrottle) == 0) {
+      return;
+    }
+
+    if (!hasRenderedFrame) {
+      display.clearDisplay();
+      drawCenteredText("THR", 1, 0);
+      drawTextRow(throttle, 8);
+      drawCenteredText("RPM", 1, 24);
+      int16_t rpmY = 32;
+      drawWrappedCenteredText(rpm, rpmY);
+      drawLowerPanel(
+        lowerPanelY,
+        voltage,
+        current,
+        temperature,
+        battery
+      );
+    } else {
+      const bool throttleChanged =
+        strcmp(throttle, lastThrottle) != 0;
+      const bool rpmChanged = strcmp(rpm, lastRpm) != 0;
+      const bool layoutChanged = rpmRows != lastRpmRows;
+
+      if (throttleChanged) {
+        drawTextRow(throttle, 8);
+      }
+
+      if (rpmChanged) {
+        const uint8_t rowsToClear =
+          rpmRows > lastRpmRows ? rpmRows : lastRpmRows;
+        display.fillRect(
+          0,
+          32,
+          display.width(),
+          rowsToClear * 8,
+          SSD1306Display::BLACK
+        );
+        int16_t rpmY = 32;
+        drawWrappedCenteredText(rpm, rpmY);
+      }
+
+      if (layoutChanged) {
+        const int16_t oldLowerPanelY = 40 + lastRpmRows * 8;
+        const int16_t clearFrom =
+          oldLowerPanelY < lowerPanelY
+            ? oldLowerPanelY
+            : lowerPanelY;
+        display.fillRect(
+          0,
+          clearFrom,
+          display.width(),
+          display.height() - clearFrom,
+          SSD1306Display::BLACK
+        );
+        drawLowerPanel(
+          lowerPanelY,
+          voltage,
+          current,
+          temperature,
+          battery
+        );
+      } else {
+        if (strcmp(voltage, lastVoltage) != 0) {
+          drawTextRow(voltage, lowerPanelY + 8);
+        }
+        if (strcmp(current, lastCurrent) != 0) {
+          drawTextRow(current, lowerPanelY + 16);
+        }
+        if (strcmp(temperature, lastTemperature) != 0) {
+          drawTextRow(temperature, lowerPanelY + 40);
+        }
+        if (strcmp(battery, lastBattery) != 0) {
+          drawTextRow(battery, lowerPanelY + 64);
+        }
+      }
+    }
+
+    if (!display.display()) {
+      return;
+    }
+
+    strcpy(lastTemperature, temperature);
+    strcpy(lastCurrent, current);
+    strcpy(lastVoltage, voltage);
+    strcpy(lastBattery, battery);
+    strcpy(lastRpm, rpm);
+    strcpy(lastThrottle, throttle);
+    lastRpmRows = rpmRows;
+    hasRenderedFrame = true;
+  }
+
+  uint8_t wrappedLineCount(const char *text) {
+    const uint8_t maxCharacters = display.width() / 6;
+    const size_t textLength = strlen(text);
+    return static_cast<uint8_t>(
+      (textLength + maxCharacters - 1) / maxCharacters
+    );
+  }
+
+  void drawTextRow(const char *text, int16_t y) {
+    display.fillRect(
+      0,
+      y,
+      display.width(),
+      8,
+      SSD1306Display::BLACK
+    );
+    drawCenteredText(text, 1, y);
+  }
+
+  void drawLowerPanel(
+    int16_t y,
+    const char *voltage,
+    const char *current,
+    const char *temperature,
+    const char *battery
+  ) {
     drawCenteredText("V/A", 1, y);
-    y += 8;
-    drawCenteredText(voltage, 1, y);
-    y += 8;
-    drawCenteredText(current, 1, y);
-    y += 16;
-    drawCenteredText("TEMP", 1, y);
-    y += 8;
-    drawCenteredText(temperature, 1, y);
-    y += 16;
-    drawCenteredText("BAT", 1, y);
-    y += 8;
-    drawCenteredText(battery, 1, y);
-    display.display();
+    drawCenteredText(voltage, 1, y + 8);
+    drawCenteredText(current, 1, y + 16);
+    drawCenteredText("TEMP", 1, y + 32);
+    drawCenteredText(temperature, 1, y + 40);
+    drawCenteredText("BAT", 1, y + 56);
+    drawCenteredText(battery, 1, y + 64);
   }
 
   void drawWrappedCenteredText(const char *text, int16_t &y) {
