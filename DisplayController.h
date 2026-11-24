@@ -39,7 +39,8 @@ public:
     uint8_t temperatureCelsius,
     uint16_t currentAmps,
     uint8_t voltageQuarterVolts,
-    uint32_t electricalRpm
+    uint32_t electricalRpm,
+    bool locked
   ) {
     this->value = value;
     this->enabled = enabled;
@@ -49,6 +50,7 @@ public:
     this->currentAmps = currentAmps;
     this->voltageQuarterVolts = voltageQuarterVolts;
     this->electricalRpm = electricalRpm;
+    this->locked = locked;
     drawIfReady();
   }
 
@@ -113,9 +115,11 @@ private:
   uint16_t currentAmps = 0;
   uint8_t voltageQuarterVolts = 0;
   uint32_t electricalRpm = 0;
+  bool locked = false;
   bool initialized = false;
   bool sleeping = false;
   bool hasRenderedFrame = false;
+  bool lastFrameLocked = false;
   uint8_t lastRpmRows = 0;
   char lastTemperature[6] = {};
   char lastCurrent[7] = {};
@@ -277,6 +281,11 @@ private:
   void drawFrame() {
     display.setTextColor(SSD1306Display::WHITE, SSD1306Display::BLACK);
 
+    if (locked) {
+      drawLockScreen();
+      return;
+    }
+
     char temperature[6];
     char current[7];
     char voltage[8];
@@ -353,6 +362,7 @@ private:
     const int16_t lowerPanelY = 40 + rpmRows * 8;
 
     if (hasRenderedFrame &&
+        !lastFrameLocked &&
         strcmp(temperature, lastTemperature) == 0 &&
         strcmp(current, lastCurrent) == 0 &&
         strcmp(voltage, lastVoltage) == 0 &&
@@ -362,7 +372,7 @@ private:
       return;
     }
 
-    if (!hasRenderedFrame) {
+    if (!hasRenderedFrame || lastFrameLocked) {
       display.clearDisplay();
       drawCenteredText("THR", 1, 0);
       drawTextRow(throttle, 8);
@@ -448,6 +458,29 @@ private:
     strcpy(lastThrottle, throttle);
     lastRpmRows = rpmRows;
     hasRenderedFrame = true;
+    lastFrameLocked = false;
+  }
+
+  void drawLockScreen() {
+    if (hasRenderedFrame && lastFrameLocked) {
+      return;
+    }
+
+    display.clearDisplay();
+    drawCenteredText("FAN", 1, 0);
+    drawCenteredText("LOCK", 1, 8);
+    drawCenteredText("HOLD", 1, 24);
+    drawCenteredText("BTN", 1, 32);
+    drawCenteredText("TURN", 1, 48);
+    drawCenteredText("UP", 1, 56);
+    drawCenteredText("ONCE", 1, 64);
+
+    if (!display.display()) {
+      return;
+    }
+
+    hasRenderedFrame = true;
+    lastFrameLocked = true;
   }
 
   uint8_t wrappedLineCount(const char *text) {

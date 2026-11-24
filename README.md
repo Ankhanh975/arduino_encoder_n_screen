@@ -6,7 +6,8 @@ This project is a small Arduino sketch for controlling an electronic speed contr
 
 - Rotary encoder-based throttle control from 0 to 100
 - Encoder rotation decoded with pin-change interrupts on Nano pins 2 and 4; skipped intermediate states are inferred from rotation direction, and queued detents are applied before one display refresh
-- Button press toggles the ESC on/off
+- Short button click toggles the ESC on/off; a long click locks the fan, turns it off, and requests one ESC beep
+- Unlock requires holding the button while turning the encoder once in the throttle-increase direction; the OLED shows the gesture
 - Bidirectional DShot 300 ESC control using the tested ATmega328P driver on pin D8
 - DShot throttle starts at 198 when enabled, then ramps linearly in both directions at 60 Hz; reaching full throttle takes about 2.1 seconds from the starting command
 - OLED dashboard in the existing portrait orientation, showing throttle, ESC temperature, current, voltage, and electrical RPM; long values wrap to a second line
@@ -56,8 +57,9 @@ Install these libraries in the Arduino IDE or PlatformIO environment:
 1. Upload the sketch to the Arduino Nano.
 2. Power the ESC and display.
 3. Rotate the encoder to adjust the throttle value in 1% steps below 20% and 2% steps from 20% upward.
-4. Press the encoder button to enable/disable throttle output.
-5. The OLED displays the throttle setting, enabled state, temperature, current, voltage, and eRPM.
+4. Short-click the encoder button to enable/disable throttle output.
+5. Long-click to lock the fan; this turns it off and requests one ESC beep (if supported). To unlock, hold the button and turn the encoder once in the throttle-increase direction. This increases the stored throttle by one step and leaves the fan off. The display still sleeps after 60 seconds of inactivity while locked; a button click wakes it.
+6. The OLED displays the throttle setting, enabled state, temperature, current, voltage, and eRPM when unlocked.
 
 ## Notes
 

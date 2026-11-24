@@ -58,6 +58,10 @@ public:
     this->value = constrain(value, 0, 100);
   }
 
+  void requestLockBeep() {
+    lockBeepPending = true;
+  }
+
   bool update() {
     const unsigned long armingNow = millis();
     if (startupState == StartupState::WaitingToEnableTelemetry) {
@@ -91,6 +95,33 @@ public:
 
     if (startupState != StartupState::Ready) {
       return false;
+    }
+
+    if (lockBeepActive) {
+      if (millis() - lockBeepStartedAt < LOCK_BEEP_DURATION_MS) {
+        return true;
+      }
+
+      if (!esc.setThrottle(0, true)) {
+        return false;
+      }
+
+      lockBeepActive = false;
+      currentThrottleQ16 = 0;
+      currentThrottleCommand = 0;
+      lastRampUpdateMicros = micros();
+      return true;
+    }
+
+    if (lockBeepPending && currentThrottleCommand == 0) {
+      if (!esc.sendCommand(LOCK_BEEP_COMMAND)) {
+        return false;
+      }
+
+      lockBeepPending = false;
+      lockBeepActive = true;
+      lockBeepStartedAt = millis();
+      return true;
     }
 
     const uint16_t targetThrottle = enabled
@@ -180,8 +211,13 @@ private:
   uint16_t currentThrottleCommand = 0;
   uint32_t lastRampUpdateMicros = 0;
   bool enabled = false;
+  bool lockBeepPending = false;
+  bool lockBeepActive = false;
+  unsigned long lockBeepStartedAt = 0;
 
   static const uint32_t Q16_ONE = 65536UL;
+  static const uint8_t LOCK_BEEP_COMMAND = 1;
+  static const unsigned long LOCK_BEEP_DURATION_MS = 30;
   static const unsigned long ARMING_DELAY_MS = 1500;
   static const unsigned long TELEMETRY_COMMAND_DURATION_MS = 24;
   static const uint32_t RAMP_UPDATE_INTERVAL_US = 16667UL;
@@ -217,6 +253,7 @@ const uint32_t DISPLAY_REFRESH_INTERVAL_US = 16667UL;
 
 int value = 22;
 bool enabled = false;
+bool locked = false;
 bool telemetryAvailable = false;
 uint8_t temperatureCelsius = 0;
 uint16_t currentAmps = 0;
@@ -226,6 +263,7 @@ uint32_t electricalRpm = 0;
 unsigned long lastInputTime = 0;
 uint32_t lastDisplayRefreshMicros = 0;
 bool displayAsleep = false;
+bool suppressNextButtonEvent = false;
 
 void stopWithError(const __FlashStringHelper *message) {
   displayController.showError(message);
@@ -245,7 +283,8 @@ void refreshDisplay() {
     temperatureCelsius,
     currentAmps,
     voltageQuarterVolts,
-    electricalRpm
+    electricalRpm,
+    locked
   );
 }
 
@@ -295,10 +334,20 @@ void loop() {
       : 0;
   }
 
+  const EncoderController::ButtonEvent buttonEvent =
+    encoder.readButtonEvent();
   const int rotation = encoder.readRotation();
   bool refreshNeeded = false;
 
-  if (rotation != 0 && !displayAsleep) {
+  if (locked && rotation > 0 && encoder.isButtonHeld()) {
+    value += valueStep(1);
+    value = constrain(value, 0, 100);
+    escController.setValue(value);
+    locked = false;
+    suppressNextButtonEvent = true;
+    registerInput();
+    refreshNeeded = true;
+  } else if (rotation != 0 && enabled && !displayAsleep) {
     registerInput();
     int remainingRotation = rotation;
     while (remainingRotation != 0) {
@@ -311,21 +360,34 @@ void loop() {
     refreshNeeded = true;
   }
 
-  if (encoder.readButtonPressed()) {
+  if (buttonEvent != EncoderController::ButtonEvent::None) {
     const bool wasAsleep = displayAsleep;
     registerInput();
 
     if (wasAsleep) {
       wakeDisplay();
-    } else {
+    }
+
+    if (suppressNextButtonEvent) {
+      suppressNextButtonEvent = false;
+    } else if (locked) {
+      refreshNeeded = true;
+    } else if (buttonEvent == EncoderController::ButtonEvent::LongClick) {
+      locked = true;
+      enabled = false;
+      value = 22;
+      escController.setValue(value);
+      escController.setEnabled(false);
+      escController.requestLockBeep();
+    } else if (buttonEvent == EncoderController::ButtonEvent::ShortClick) {
       enabled = !enabled;
       if (!enabled) {
         value = 22;
         escController.setValue(value);
       }
       escController.setEnabled(enabled);
-      refreshNeeded = true;
     }
+    refreshNeeded = true;
   }
 
   displayController.update();

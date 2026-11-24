@@ -10,6 +10,12 @@
 
 class EncoderController {
 public:
+  enum class ButtonEvent : uint8_t {
+    None,
+    ShortClick,
+    LongClick
+  };
+
   EncoderController(int clkPin, int dtPin, int switchPin)
     : clkPin(clkPin),
       dtPin(dtPin),
@@ -24,6 +30,7 @@ public:
     lastButtonReading = HIGH;
     stableButtonState = HIGH;
     lastDebounceTime = 0;
+    longPressReported = false;
     transitionCount = 0;
     lastDirection = 0;
     unresolvedSkippedTransition = false;
@@ -60,26 +67,49 @@ public:
     updateEncoderState();
   }
 
-  bool readButtonPressed() {
+  ButtonEvent readButtonEvent() {
     const bool reading = digitalRead(switchPin);
-    bool pressed = false;
+    const unsigned long now = millis();
+    ButtonEvent event = ButtonEvent::None;
 
     if (reading != lastButtonReading) {
-      lastDebounceTime = millis();
+      lastDebounceTime = now;
     }
 
-    if (millis() - lastDebounceTime > DEBOUNCE_TIME &&
+    if (now - lastDebounceTime > DEBOUNCE_TIME &&
         reading != stableButtonState) {
       stableButtonState = reading;
-      pressed = stableButtonState == LOW;
+      if (stableButtonState == LOW) {
+        buttonPressStartedAt = now;
+        longPressReported = false;
+      } else {
+        if (!longPressReported) {
+          event = now - buttonPressStartedAt >= LONG_CLICK_TIME
+            ? ButtonEvent::LongClick
+            : ButtonEvent::ShortClick;
+        }
+        longPressReported = false;
+      }
+    }
+
+    if (stableButtonState == LOW &&
+        !longPressReported &&
+        now - buttonPressStartedAt >= LONG_CLICK_TIME) {
+      event = ButtonEvent::LongClick;
+      longPressReported = true;
     }
 
     lastButtonReading = reading;
-    return pressed;
+    return event;
+  }
+
+  bool isButtonHeld() const {
+    return stableButtonState == LOW;
   }
 
 private:
   static const unsigned long DEBOUNCE_TIME = 30;
+  static const unsigned long LONG_CLICK_TIME = 1000;
 
   int clkPin;
   int dtPin;
@@ -91,7 +121,9 @@ private:
   bool interruptMode = false;
   bool lastButtonReading = HIGH;
   bool stableButtonState = HIGH;
+  bool longPressReported = false;
   unsigned long lastDebounceTime = 0;
+  unsigned long buttonPressStartedAt = 0;
 
   void updateEncoderState() {
     const uint8_t currentState = readEncoderState();
