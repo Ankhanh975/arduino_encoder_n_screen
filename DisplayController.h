@@ -341,7 +341,9 @@ private:
         sizeof(rpm),
         "%lu",
         static_cast<unsigned long>(
-          electricalRpm / (MOTOR_POLE_COUNT / 2)
+          (
+            electricalRpm / (MOTOR_POLE_COUNT / 2) + 2UL
+          ) / 5UL * 5UL
         )
       );
     } else {
@@ -467,13 +469,16 @@ private:
     }
 
     display.clearDisplay();
-    drawCenteredText("FAN", 1, 0);
-    drawCenteredText("LOCK", 1, 8);
+    drawCenteredText("LOCK", 1, 0);
+    drawCenteredText("ED", 1, 8);
     drawCenteredText("HOLD", 1, 24);
-    drawCenteredText("BTN", 1, 32);
-    drawCenteredText("TURN", 1, 48);
-    drawCenteredText("UP", 1, 56);
-    drawCenteredText("ONCE", 1, 64);
+    drawCenteredText("AND", 1, 32);
+    drawCenteredText("TURN", 1, 40);
+    drawCenteredText("CLOCK", 1, 48);
+    drawCenteredText("WISE", 1, 56);
+    drawCenteredText("TO", 1, 64);
+    drawCenteredText("UN", 1, 72);
+    drawCenteredText("LOCK", 1, 80);
 
     if (!display.display()) {
       return;

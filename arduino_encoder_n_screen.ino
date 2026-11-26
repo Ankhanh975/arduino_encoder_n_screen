@@ -1,6 +1,7 @@
 #include <Wire.h>
 #if defined(__AVR_ATmega328P__)
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
 #endif
 #include "BiDirectionalDShot/src/BiDirectionalDShot.h"
 #include "BiDirectionalDShot/src/BiDirectionalDShot.cpp"
@@ -58,8 +59,30 @@ public:
     this->value = constrain(value, 0, 100);
   }
 
-  void requestLockBeep() {
-    lockBeepPending = true;
+  void requestBeep() {
+    beepPending = true;
+  }
+
+  bool isStopped() const {
+    return startupState == StartupState::Ready &&
+      !enabled &&
+      currentThrottleQ16 == 0 &&
+      currentThrottleCommand == 0 &&
+      !beepPending &&
+      !beepActive;
+  }
+
+  bool pauseDshot() {
+    return isStopped() && esc.pause();
+  }
+
+  bool resumeDshot() {
+    if (!esc.resume()) {
+      return false;
+    }
+
+    lastRampUpdateMicros = micros();
+    return true;
   }
 
   bool update() {
@@ -97,8 +120,8 @@ public:
       return false;
     }
 
-    if (lockBeepActive) {
-      if (millis() - lockBeepStartedAt < LOCK_BEEP_DURATION_MS) {
+    if (beepActive) {
+      if (millis() - beepStartedAt < BEEP_COMMAND_DURATION_MS) {
         return true;
       }
 
@@ -106,25 +129,27 @@ public:
         return false;
       }
 
-      lockBeepActive = false;
+      beepActive = false;
       currentThrottleQ16 = 0;
       currentThrottleCommand = 0;
       lastRampUpdateMicros = micros();
       return true;
     }
 
-    if (lockBeepPending && currentThrottleCommand == 0) {
-      if (!esc.sendCommand(LOCK_BEEP_COMMAND)) {
+    if (beepPending &&
+        currentThrottleQ16 == 0 &&
+        currentThrottleCommand == 0) {
+      if (!esc.sendCommand(BEEP_COMMAND)) {
         return false;
       }
 
-      lockBeepPending = false;
-      lockBeepActive = true;
-      lockBeepStartedAt = millis();
+      beepPending = false;
+      beepActive = true;
+      beepStartedAt = millis();
       return true;
     }
 
-    const uint16_t targetThrottle = enabled
+    const uint16_t targetThrottle = enabled && !beepPending
       ? map(value, 0, 100, minThrottle, maxThrottle)
       : 0;
     const uint32_t targetThrottleQ16 =
@@ -140,6 +165,7 @@ public:
     lastRampUpdateMicros += elapsedSteps * RAMP_UPDATE_INTERVAL_US;
 
     if (enabled &&
+        !beepPending &&
         currentThrottleQ16 < DSHOT_MIN_VALID_THROTTLE_Q16) {
       currentThrottleQ16 = DSHOT_MIN_VALID_THROTTLE_Q16;
       if (!esc.setThrottle(MIN_DSHOT_THROTTLE, true)) {
@@ -210,16 +236,16 @@ private:
   uint32_t currentThrottleQ16 = 0;
   uint16_t currentThrottleCommand = 0;
   uint32_t lastRampUpdateMicros = 0;
+  unsigned long beepStartedAt = 0;
   bool enabled = false;
-  bool lockBeepPending = false;
-  bool lockBeepActive = false;
-  unsigned long lockBeepStartedAt = 0;
+  bool beepPending = false;
+  bool beepActive = false;
 
   static const uint32_t Q16_ONE = 65536UL;
-  static const uint8_t LOCK_BEEP_COMMAND = 1;
-  static const unsigned long LOCK_BEEP_DURATION_MS = 30;
   static const unsigned long ARMING_DELAY_MS = 1500;
   static const unsigned long TELEMETRY_COMMAND_DURATION_MS = 24;
+  static const unsigned long BEEP_COMMAND_DURATION_MS = 20;
+  static const uint8_t BEEP_COMMAND = 1;
   static const uint32_t RAMP_UPDATE_INTERVAL_US = 16667UL;
   static const uint32_t RAMP_STEPS_FULL_SCALE = 7UL * 60UL / 3UL;
   static const uint32_t RAMP_STEP_Q16 =
@@ -243,8 +269,11 @@ EscController escController(
 DisplayController displayController(display, Wire);
 
 #if defined(__AVR_ATmega328P__)
+volatile bool inputWakeRequested = false;
+
 ISR(PCINT2_vect) {
   encoder.handleEncoderInterrupt();
+  inputWakeRequested = true;
 }
 #endif
 
@@ -300,6 +329,31 @@ void wakeDisplay() {
   }
 }
 
+void sleepUntilInput() {
+#if defined(__AVR_ATmega328P__)
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  cli();
+  if (inputWakeRequested) {
+    inputWakeRequested = false;
+    sei();
+  } else {
+    sleep_enable();
+    sei();
+    sleep_cpu();
+    sleep_disable();
+    inputWakeRequested = false;
+  }
+
+  if (!escController.resumeDshot()) {
+    stopWithError(F("Failed to resume DShot after sleep."));
+  }
+
+  wakeDisplay();
+  registerInput();
+  lastDisplayRefreshMicros = micros();
+#endif
+}
+
 void setup() {
   value = 22;
   enabled = false;
@@ -322,6 +376,12 @@ void setup() {
 }
 
 void loop() {
+#if defined(__AVR_ATmega328P__)
+  noInterrupts();
+  inputWakeRequested = false;
+  interrupts();
+#endif
+
   BiDirectionalDShot::Telemetry telemetry;
   if (escController.readTelemetry(telemetry) && telemetry.crcValid) {
     telemetryAvailable = true;
@@ -345,6 +405,7 @@ void loop() {
     escController.setValue(value);
     locked = false;
     suppressNextButtonEvent = true;
+    escController.requestBeep();
     registerInput();
     refreshNeeded = true;
   } else if (rotation != 0 && enabled && !displayAsleep) {
@@ -378,7 +439,6 @@ void loop() {
       value = 22;
       escController.setValue(value);
       escController.setEnabled(false);
-      escController.requestLockBeep();
     } else if (buttonEvent == EncoderController::ButtonEvent::ShortClick) {
       enabled = !enabled;
       if (!enabled) {
@@ -410,9 +470,17 @@ void loop() {
   }
 
   if (!enabled &&
+      !encoder.isButtonHeld() &&
       !displayAsleep &&
       millis() - lastInputTime >= DISPLAY_SLEEP_TIMEOUT) {
     displayController.sleep();
     displayAsleep = true;
+  }
+
+  if (displayAsleep && escController.isStopped()) {
+    if (!escController.pauseDshot()) {
+      stopWithError(F("Failed to pause DShot before sleep."));
+    }
+    sleepUntilInput();
   }
 }

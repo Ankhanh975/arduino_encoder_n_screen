@@ -37,9 +37,10 @@ public:
 
 #if defined(__AVR_ATmega328P__)
     if (clkPin >= 0 && clkPin <= 7 &&
-        dtPin >= 0 && dtPin <= 7) {
+        dtPin >= 0 && dtPin <= 7 &&
+        switchPin >= 0 && switchPin <= 7) {
       const uint8_t pinChangeMask =
-        _BV(clkPin) | _BV(dtPin);
+        _BV(clkPin) | _BV(dtPin) | _BV(switchPin);
       PCMSK2 |= pinChangeMask;
       PCIFR |= _BV(PCIF2);
       PCICR |= _BV(PCIE2);
