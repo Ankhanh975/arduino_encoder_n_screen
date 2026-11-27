@@ -355,7 +355,7 @@ private:
     }
 
     if (enabled) {
-      snprintf(throttle, sizeof(throttle), "%d%%", value);
+      snprintf(throttle, sizeof(throttle), "%d%%", 101 - value);
     } else {
       snprintf(throttle, sizeof(throttle), "OFF");
     }

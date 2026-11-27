@@ -7,11 +7,11 @@ This project is a small Arduino sketch for controlling an electronic speed contr
 - Rotary encoder-based throttle control from 0 to 100
 - Encoder rotation decoded with pin-change interrupts on Nano pins 2 and 4; skipped intermediate states are inferred from rotation direction, and queued detents are applied before one display refresh
 - Short button click toggles the ESC on/off; a long click locks the fan and turns it off
-- Unlock requires holding the button while turning the encoder clockwise once; the OLED prompts “HOLD AND TURN CLOCKWISE TO UNLOCK” and the ESC beeps once on unlock
+- Unlock requires holding the button while turning the encoder clockwise once; the OLED prompts “HOLD AND TURN CLOCKWISE TO UNLOCK” without playing an ESC beep
 - Bidirectional DShot 300 ESC control using the tested ATmega328P driver on pin D8
 - DShot throttle starts at 198 when enabled, then ramps linearly in both directions at 60 Hz; reaching full throttle takes about 2.1 seconds from the starting command
 - OLED dashboard in the existing portrait orientation, showing throttle, ESC temperature, current, voltage, and electrical RPM; long values wrap to a second line
-- After 60 seconds of inactivity with the fan off, the OLED turns off, DShot stops, and the ATmega328P enters power-down sleep; encoder or button activity wakes the display and resumes DShot at stop throttle
+- After 60 seconds of inactivity with the fan off, only the OLED turns off; DShot continues communicating at 500 Hz while encoder or button activity wakes the display
 - DShot startup sequence for safe arming and extended telemetry enablement
 - ESC arming runs without blocking encoder/button input; throttle requests are applied after arming completes
 - ESC telemetry is requested on runtime DShot frames at 500 Hz and read continuously; the OLED dashboard refreshes at up to 60 fps
@@ -58,7 +58,7 @@ Install these libraries in the Arduino IDE or PlatformIO environment:
 2. Power the ESC and display.
 3. Rotate the encoder to adjust the throttle value in 1% steps below 20% and 2% steps from 20% upward.
 4. Short-click the encoder button to enable/disable throttle output.
-5. Long-click to lock the fan; this turns it off. To unlock, hold the button and turn the encoder clockwise once. This increases the stored throttle by one step, leaves the fan off, and requests one beep from compatible ESCs. The display still sleeps after 60 seconds of inactivity while locked; a button click wakes it.
+5. Long-click to lock the fan; this turns it off. To unlock, hold the button and turn the encoder clockwise once. This increases the stored throttle by one step and leaves the fan off without playing a beep. The display still sleeps after 60 seconds of inactivity while locked; a button click wakes it.
 6. The OLED displays the throttle setting, enabled state, temperature, current, voltage, and eRPM when unlocked.
 
 ## Notes
@@ -66,7 +66,7 @@ Install these libraries in the Arduino IDE or PlatformIO environment:
 - The ESC startup routine sends DShot stop, then requests extended telemetry before normal operation. Runtime throttle and stop frames continue requesting telemetry; eRPM is calculated from the reported electrical period. `DISPLAY_REFRESH_INTERVAL_US` only sets the OLED refresh interval, not the DShot telemetry request rate.
 - Fatal ESC startup or throttle-update errors are shown on the OLED; the sketch does not log to Serial.
 - The throttle is constrained to a range of 0 to 100 and is only sent to the ESC when enabled.
-- Display sleep is enabled after a timeout to reduce burn-in and save power.
+- Display sleep turns off only the OLED after a timeout to reduce burn-in; the MCU remains awake and DShot communication continues at 500 Hz.
 - Enabled throttle maps 0–100% to the DShot throttle range of 198–2047, skipping lower values that stall the motor; the first command is 198 and disabled output is DShot stop (0). Actual motor spin-up time depends on the ESC and motor.
 
 ## File structure

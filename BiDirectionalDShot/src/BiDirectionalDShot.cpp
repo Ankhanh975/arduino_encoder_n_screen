@@ -11,7 +11,6 @@ namespace {
 
 const uint8_t dshotPin = 8;
 const uint8_t captureBufferSize = 20;
-const uint16_t currentZeroOffset = 100;
 
 volatile uint16_t frame;
 volatile uint32_t capturedResponse;
@@ -245,7 +244,6 @@ BiDirectionalDShot::BiDirectionalDShot(
     _rate(rate),
     _extendedTelemetry(extendedTelemetry),
     _begun(false),
-    _paused(false),
     _lastPeriodMicroseconds(0),
     _receivedPackets(0),
     _successfulPackets(0),
@@ -301,46 +299,8 @@ bool BiDirectionalDShot::sendCommand(uint8_t command, bool telemetryRequest) {
   return true;
 }
 
-bool BiDirectionalDShot::pause() {
-  if(!_begun) {
-    return false;
-  }
-  if(_paused) {
-    return true;
-  }
-
-  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    TIMSK2 &= ~_BV(OCIE2A);
-    TCCR2A = 0;
-    TCCR2B = 0;
-    TCNT2 = 0;
-    TIFR2 = _BV(OCF2A);
-    if(_inverted) {
-      PORTB |= _BV(PB0);
-    } else {
-      PORTB &= ~_BV(PB0);
-    }
-  }
-
-  _paused = true;
-  return true;
-}
-
-bool BiDirectionalDShot::resume() {
-  if(!_begun) {
-    return false;
-  }
-  if(!_paused) {
-    return true;
-  }
-
-  setupTimer(updateRate);
-  _paused = false;
-  return true;
-}
-
 bool BiDirectionalDShot::readTelemetry(Telemetry& telemetry) {
-  if(!_begun || _paused || !_inverted) {
+  if(!_begun || !_inverted) {
     return false;
   }
 
@@ -388,11 +348,7 @@ bool BiDirectionalDShot::readTelemetry(Telemetry& telemetry) {
         case 0x02: _temperatureCelsius = periodBase; break;
         case 0x04: _voltageQuarterVolts = periodBase; break;
         case 0x06: {
-          const uint16_t rawCurrent =
-            static_cast<uint16_t>(value & 0x00FF);
-          _currentAmps = rawCurrent <= currentZeroOffset
-            ? currentZeroOffset - rawCurrent
-            : 0;
+          _currentAmps = static_cast<uint16_t>(value & 0x00FF);
           _currentAvailable = true;
           break;
         }

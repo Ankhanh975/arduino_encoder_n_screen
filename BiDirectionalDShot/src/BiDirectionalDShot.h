@@ -48,8 +48,6 @@ public:
   bool setThrottle(uint16_t value, bool telemetryRequest = false);
   bool sendCommand(uint8_t command, bool telemetryRequest = false);
   bool readTelemetry(Telemetry& telemetry);
-  bool pause();
-  bool resume();
 
 private:
   uint8_t _pin;
@@ -57,7 +55,6 @@ private:
   Rate _rate;
   bool _extendedTelemetry;
   bool _begun;
-  bool _paused;
   uint32_t _lastPeriodMicroseconds;
   uint32_t _receivedPackets;
   uint32_t _successfulPackets;
