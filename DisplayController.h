@@ -314,11 +314,13 @@ private:
         static_cast<unsigned int>(temperatureCelsius)
       );
       if (currentTelemetryAvailable) {
+        const uint16_t displayedCurrentAmps =
+          currentAmps < 104U ? 104U - currentAmps : 0U;
         snprintf(
           current,
           sizeof(current),
           "%uA",
-          static_cast<unsigned int>(currentAmps)
+          static_cast<unsigned int>(displayedCurrentAmps)
         );
       } else {
         snprintf(current, sizeof(current), "--A");
@@ -355,7 +357,7 @@ private:
     }
 
     if (enabled) {
-      snprintf(throttle, sizeof(throttle), "%d%%", 101 - value);
+      snprintf(throttle, sizeof(throttle), "%d%%", value);
     } else {
       snprintf(throttle, sizeof(throttle), "OFF");
     }

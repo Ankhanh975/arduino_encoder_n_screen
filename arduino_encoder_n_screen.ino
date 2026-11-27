@@ -15,7 +15,7 @@ const int CLK_PIN = 2;
 const int DT_PIN  = 4;
 const int SW_PIN  = 5;
 const int ESC_PIN = 8;
-const uint16_t MIN_DSHOT_THROTTLE = 198;
+const uint16_t MIN_DSHOT_THROTTLE = 250;
 const uint16_t MAX_DSHOT_THROTTLE = 2047;
 
 SSD1306Display display(Wire);
@@ -235,7 +235,7 @@ void stopWithError(const __FlashStringHelper *message) {
 }
 
 int valueStep(int direction) {
-  return value < 20 || (direction < 0 && value == 20) ? 1 : 2;
+  return value < 32 || (direction < 0 && value == 32) ? 1 : 2;
 }
 
 void refreshDisplay() {
